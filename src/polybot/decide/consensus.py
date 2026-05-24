@@ -56,7 +56,9 @@ def vote_on_signal(signal: Signal, market: dict, *, client: Anthropic | None = N
         system=_SYSTEM,
         messages=[{"role": "user", "content": json.dumps(payload)}],
     )
-    text = msg.content[0].text.strip()
+    text = "".join(getattr(b, "text", "") for b in msg.content).strip()
+    if text.startswith("```"):  # strip markdown fences if the model adds them
+        text = text.strip("`").removeprefix("json").strip()
     try:
         data = json.loads(text)
         return Vote(

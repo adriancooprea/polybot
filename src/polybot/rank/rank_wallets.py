@@ -191,12 +191,14 @@ def rank_wallets(
         resolutions_csv=resolutions_csv,
     )
     con = duckdb.connect()
-    rel = con.execute(sql)
+    # Materialize once into a temp table — the query is a full pass over ~151M
+    # rows; running it twice (once to fetch, once to COPY) doubles the work.
+    con.execute(f"CREATE TEMP TABLE ranked AS {sql.rstrip().rstrip(';')}")
     if out_csv is not None:
         out_csv.parent.mkdir(parents=True, exist_ok=True)
-        con.execute(f"COPY ({sql.rstrip().rstrip(';')}) TO '{out_csv}' (HEADER, DELIMITER ',')")
+        con.execute(f"COPY ranked TO '{out_csv}' (HEADER, DELIMITER ',')")
         print(f"Wrote ranked wallets to {out_csv}")
-    return rel
+    return con.execute("SELECT * FROM ranked")
 
 
 def main() -> None:

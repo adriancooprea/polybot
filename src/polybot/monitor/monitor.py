@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import csv
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,15 +32,21 @@ class Signal:
 
 @dataclass
 class _Window:
-    """Per-(market, outcome) sliding window of recent wallet entries."""
+    """Per-(market, outcome) sliding window of recent wallet entries.
 
-    entries: deque[tuple[int, str, float]] = field(default_factory=deque)  # (ts, wallet, price)
+    Entries arrive out of timestamp order (wallets polled sequentially, API
+    paginates newest-first), so prune by *event time* against the newest
+    timestamp seen — not by insertion (FIFO) order, which would drop the wrong
+    entries and admit out-of-span ones.
+    """
+
+    entries: list[tuple[int, str, float]] = field(default_factory=list)  # (ts, wallet, price)
 
     def add(self, ts: int, wallet: str, price: float, horizon_s: int) -> None:
         self.entries.append((ts, wallet, price))
-        cutoff = ts - horizon_s
-        while self.entries and self.entries[0][0] < cutoff:
-            self.entries.popleft()
+        newest = max(e[0] for e in self.entries)
+        cutoff = newest - horizon_s
+        self.entries = [e for e in self.entries if e[0] >= cutoff]
 
     def distinct_wallets(self) -> set[str]:
         return {w for _, w, _ in self.entries}
@@ -69,12 +75,15 @@ class Monitor:
         self.client = client
         self.min_agree = min_agree
         self.horizon_s = window_minutes * 60
+        # Ignore activity older than start (minus one window) so booting the bot
+        # doesn't fire signals on hours-old historical trades.
+        self.since_ts = int(time.time()) - self.horizon_s
         self._seen_tx: set[str] = set()
         self._windows: dict[tuple[str, str], _Window] = defaultdict(_Window)
         self._fired: set[tuple[str, str, frozenset]] = set()
 
     def _ingest(self, act: Activity) -> Signal | None:
-        if act.tx_hash in self._seen_tx or act.side != "BUY":
+        if act.tx_hash in self._seen_tx or act.side != "BUY" or act.timestamp < self.since_ts:
             self._seen_tx.add(act.tx_hash)
             return None
         self._seen_tx.add(act.tx_hash)

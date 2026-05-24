@@ -7,7 +7,7 @@ Every order passes risk checks before it can touch the CLOB:
 - Dry-run default: orders are logged, not sent, unless ``DRY_RUN=false``.
 
 No code path places a real order without clearing all three. When live, orders
-route to ``TradeClient`` (py-clob-client) as market FOK orders.
+route to ``TradeClient`` (py-clob-client-v2) as market FOK orders.
 """
 
 from __future__ import annotations

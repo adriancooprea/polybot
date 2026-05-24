@@ -87,7 +87,9 @@ class PolymarketClient:
         r = self._http.get(f"{GAMMA_API}/markets", params={"condition_ids": condition_id})
         r.raise_for_status()
         data = r.json()
-        return data[0] if isinstance(data, list) and data else data
+        if isinstance(data, list):
+            return data[0] if data else {}  # {} (not []) so callers can .get() safely
+        return data or {}
 
     def midpoint(self, token_id: str) -> float | None:
         """Current midpoint price for an outcome token from the CLOB."""
