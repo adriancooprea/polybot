@@ -24,6 +24,7 @@ def main() -> None:
     stub("download", "download the Polymarket trade dataset")
     stub("resolutions", "fetch ground-truth market resolutions")
     stub("rank", "rank wallets and write top_wallets.csv")
+    stub("leaderboard", "fresh wallet ranking from the live profit leaderboard")
     stub("monitor", "print consensus signals from top wallets")
     stub("run", "run the full trading bot")
     stub("dashboard", "launch the terminal dashboard")
@@ -39,6 +40,8 @@ def main() -> None:
         from .ingest.resolutions import main as f
     elif args.cmd == "rank":
         from .rank.rank_wallets import main as f
+    elif args.cmd == "leaderboard":
+        from .rank.leaderboard import main as f
     elif args.cmd == "monitor":
         from .monitor.monitor import main as f
     elif args.cmd == "run":
