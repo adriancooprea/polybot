@@ -9,6 +9,7 @@ the executor can gate on.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 
 from anthropic import Anthropic
@@ -16,7 +17,9 @@ from anthropic import Anthropic
 from ..config import CONFIG
 from ..monitor.monitor import Signal
 
-MODEL = "claude-opus-4-7"
+# Opus by default (best judgment, ~$18/mo at ~50 signals/day). Set CLAUDE_MODEL
+# to claude-haiku-4-5 to cut the vote cost to ~$1/mo.
+MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-4-7")
 
 _SYSTEM = (
     "You are a risk gate for a Polymarket copy-trading bot. Multiple proven "
