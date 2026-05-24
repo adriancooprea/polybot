@@ -23,15 +23,24 @@ Code-complete and verified end-to-end in dry-run against live APIs. What's prove
 - Full dry-run pipeline runs: signal → vote → token resolution → risk-gated
   execute → state persistence → exit evaluation.
 
-**Open blocker — live order submission.** Polymarket migrated to CLOB V2 on
-2026-04-28 (legacy `py-clob-client` is dead → we use `py-clob-client-v2`). New
-accounts are EIP-7702 **deposit wallets** using `signature_type=3` (POLY_1271).
-The V2 SDK currently can't post orders for these: its L1 auth binds the API key
-to the EOA, not the deposit wallet, so POSTs are rejected ("maker address not
-allowed" / "Could not create api key"). Balance/allowance reads work. Tracked
-upstream: py-clob-client-v2 issues #65/#70/#71. **Funds + allowances are ready;**
-flip `DRY_RUN=false` once upstream ships the fix. Until then: dry-run, or trade
-manually on the site.
+**Live order submission — WORKING (2026-05-24).** Confirmed by placing a real
+`$1` limit order on the live CLOB and cancelling it. Polymarket uses CLOB V2
+(legacy `py-clob-client` is dead → `py-clob-client-v2`); new accounts are
+EIP-7702 deposit wallets, `signature_type=3` (POLY_1271). The SDK *can't mint* a
+deposit-wallet-bound API key (issues #65/#70/#71), but you don't need to — the
+account already has one. The two things that make it work:
+
+1. **`POLYMARKET_FUNDER` must be the account's "API wallet"** — the address shown
+   on the site as *"for API use only"* (Portfolio → wallet address popover), NOT
+   the deposit address you send USDC to. The CLOB credits your deposit to this
+   API wallet, and orders set `signer == maker == funder == the API-key address`,
+   which the exchange's signer check requires.
+2. **Supply the account's existing L2 creds** in `.env`
+   (`POLYMARKET_API_KEY/SECRET/PASSPHRASE`). L2 auth uses the EOA address (don't
+   override it); the EOA signs, the deposit wallet validates via EIP-1271.
+
+`clob.py` uses these creds directly when present (else falls back to derive).
+Flip `DRY_RUN=false` to arm. Daily cap + kill-switch still apply.
 
 ### Pick up here (e.g. on a bigger machine)
 
