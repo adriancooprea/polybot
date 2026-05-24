@@ -153,9 +153,12 @@ def run() -> None:
               f"| resuming {len(store.all())} open trade(s)")
 
         while True:
-            for sig in monitor.poll_once():
-                _handle_signal(sig, pm, executor, store, anthropic)
-            _handle_exits(pm, executor, store)
+            try:
+                for sig in monitor.poll_once():
+                    _handle_signal(sig, pm, executor, store, anthropic)
+                _handle_exits(pm, executor, store)
+            except Exception as exc:  # never let one bad cycle kill the loop
+                print(f"  ! cycle error (continuing): {exc}")
             time.sleep(CONFIG.poll_seconds)
 
 

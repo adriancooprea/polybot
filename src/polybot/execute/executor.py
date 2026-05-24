@@ -100,13 +100,20 @@ class Executor:
 
         if not order.token_id:
             raise RiskError("live order missing token_id")
+        if order.side == "SELL" and order.shares <= 0:
+            raise RiskError("live SELL requires shares > 0")
         client = self._client()
-        if order.side == "BUY":
-            fill = client.market_buy(order.token_id, order.size_usd)
-        else:
-            if order.shares <= 0:
-                raise RiskError("live SELL requires shares > 0")
-            fill = client.market_sell(order.token_id, order.shares)
+        try:
+            if order.side == "BUY":
+                fill = client.market_buy(order.token_id, order.size_usd)
+            else:
+                fill = client.market_sell(order.token_id, order.shares)
+        except RiskError:
+            raise
+        except Exception as e:  # SDK/CLOB error (e.g. FOK kill) must not crash the bot
+            self._log(order, "ERROR", {"error": str(e)[:300]})
+            print(f"[ERROR] {order.side} {order.outcome}: {str(e)[:160]}")
+            raise RiskError(f"order failed: {str(e)[:160]}")
 
         status = "FILLED" if fill.ok else "REJECTED"
         self._log(order, status, {"order_id": fill.order_id, "clob_status": fill.status})

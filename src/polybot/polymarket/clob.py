@@ -77,9 +77,9 @@ class TradeClient:
 
         resp = self._client.create_and_post_market_order(
             order_args=MarketOrderArgsV2(token_id=token_id, amount=float(usd_amount),
-                                         side=Side.BUY, order_type=OrderType.FOK),
+                                         side=Side.BUY, order_type=OrderType.FAK),
             options=PartialCreateOrderOptions(tick_size=self._tick(token_id)),
-            order_type=OrderType.FOK,
+            order_type=OrderType.FAK,
         )
         return self._to_fill(resp)
 
@@ -89,9 +89,9 @@ class TradeClient:
 
         resp = self._client.create_and_post_market_order(
             order_args=MarketOrderArgsV2(token_id=token_id, amount=float(shares),
-                                         side=Side.SELL, order_type=OrderType.FOK),
+                                         side=Side.SELL, order_type=OrderType.FAK),
             options=PartialCreateOrderOptions(tick_size=self._tick(token_id)),
-            order_type=OrderType.FOK,
+            order_type=OrderType.FAK,
         )
         return self._to_fill(resp)
 
