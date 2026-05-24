@@ -120,8 +120,15 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
 
 def _handle_exits(pm: PolymarketClient, executor: Executor, store: TradeStore) -> None:
     for market_id, trade in store.all().items():
-        market = pm.market(market_id)
-        current = pm.outcome_price(market, trade.outcome) or trade.entry_price
+        # Price off the live CLOB midpoint (same as entries) — Gamma's
+        # outcomePrices lag, which would stop take-profit/stop-loss from firing.
+        mid = pm.midpoint(trade.token_id)
+        if mid and mid > 0:
+            current = mid
+        else:
+            market = pm.market(market_id)
+            current = (pm.outcome_price(market, trade.outcome)
+                       if isinstance(market, dict) and market else None) or trade.entry_price
         decision = evaluate_exit(
             pm, market_id=market_id, entry_price=trade.entry_price,
             current_price=current, trigger_wallets=tuple(trade.trigger_wallets),
