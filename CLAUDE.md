@@ -42,21 +42,28 @@ This bot moves real money. Treat `execute/` as the danger zone:
 One-command launcher (`run.sh`) bootstraps a venv, installs, and dispatches:
 
 ```
-./run.sh download    # ingest: fetch the 86M-trade snapshot -> data/
-./run.sh rank        # rank wallets -> data/top_wallets.csv
-./run.sh monitor     # print consensus signals from top wallets
-./run.sh             # run the full bot (monitor -> Claude vote -> execute -> exit)
-./run.sh dashboard   # Matrix terminal dashboard
+./run.sh download      # ingest: fetch the 86M-trade snapshot -> data/
+./run.sh resolutions   # fetch ground-truth resolutions -> data/resolutions.csv
+./run.sh rank          # rank wallets -> data/top_wallets.csv
+./run.sh monitor       # print consensus signals from top wallets
+./run.sh doctor        # preflight: config + data readiness
+./run.sh               # run the full bot (monitor -> Claude vote -> execute -> exit)
+./run.sh dashboard     # Matrix terminal dashboard
 ```
+
+Tests: `pytest tests/` (offline; covers risk gates + state).
 
 Same commands via the installed entrypoint: `polybot <cmd>`.
 
 Pipeline → module map:
-- ingest  → `ingest/download.py`, schema in `ingest/schema.py`
-- rank    → `rank/rank_wallets.py` (DuckDB, out-of-core)
+- ingest  → `ingest/download.py`, `ingest/resolutions.py`, schema in `ingest/schema.py`
+- rank    → `rank/rank_wallets.py` (DuckDB, out-of-core; `--resolutions` for truth)
 - monitor → `monitor/monitor.py` (consensus detection)
 - decide  → `decide/consensus.py` (Claude risk-gate vote)
-- execute → `execute/executor.py` (caps + kill-switch), `execute/exit_rules.py`
+- execute → `execute/executor.py` (caps + kill-switch + live routing),
+            `execute/exit_rules.py`
+- trade   → `polymarket/client.py` (read), `polymarket/clob.py` (live orders)
+- state   → `state.py` (open-trade persistence -> data/open_trades.json)
 - bot     → `bot.py` (orchestrator), `cli.py` (CLI)
 
 Kill-switch: `touch data/KILL` halts all trading.

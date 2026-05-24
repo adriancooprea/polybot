@@ -44,8 +44,37 @@ def build_sql(
     min_win_rate: float,
     window_days: int,
     top_n: int,
+    resolutions_csv: Path | None = None,
 ) -> str:
-    """Return the DuckDB SQL that produces the ranked wallet table."""
+    """Return the DuckDB SQL that produces the ranked wallet table.
+
+    If ``resolutions_csv`` is given, ground-truth settlement overrides the
+    inferred final-price heuristic for any token present in that file.
+    """
+    if resolutions_csv is not None:
+        settlement_cte = f"""
+truth AS (
+    SELECT CAST(token_id AS VARCHAR) AS token, CAST(settlement AS DOUBLE) AS settle
+    FROM read_csv_auto('{resolutions_csv}', header=true)
+),
+settlement AS (
+    SELECT lp.token,
+           COALESCE(t.settle,
+                    CASE WHEN lp.final_price >= {WIN_PRICE} THEN 1.0
+                         WHEN lp.final_price <= {LOSE_PRICE} THEN 0.0
+                         ELSE NULL END) AS settle
+    FROM last_price lp
+    LEFT JOIN truth t ON CAST(lp.token AS VARCHAR) = t.token
+),"""
+    else:
+        settlement_cte = f"""
+settlement AS (
+    SELECT token,
+           CASE WHEN final_price >= {WIN_PRICE} THEN 1.0
+                WHEN final_price <= {LOSE_PRICE} THEN 0.0
+                ELSE NULL END AS settle
+    FROM last_price
+),"""
     return f"""
 WITH trades AS (
     SELECT * FROM read_csv_auto('{trades_csv}', header=true)
@@ -81,14 +110,7 @@ last_price AS (
         SELECT takerAssetId AS token, price, timestamp FROM trades
     )
     GROUP BY token
-),
-settlement AS (
-    SELECT token,
-           CASE WHEN final_price >= {WIN_PRICE} THEN 1.0
-                WHEN final_price <= {LOSE_PRICE} THEN 0.0
-                ELSE NULL END AS settle
-    FROM last_price
-),
+),{settlement_cte}
 -- net each wallet's position per token, then realize PnL at settlement
 positions AS (
     SELECT l.wallet, l.market_id, l.token,
@@ -140,6 +162,7 @@ def rank_wallets(
     window_days: int = 90,
     top_n: int = 100,
     out_csv: Path | None = None,
+    resolutions_csv: Path | None = None,
 ):
     """Run the ranking query and return the result as a DuckDB relation."""
     sql = build_sql(
@@ -148,6 +171,7 @@ def rank_wallets(
         min_win_rate=min_win_rate,
         window_days=window_days,
         top_n=top_n,
+        resolutions_csv=resolutions_csv,
     )
     con = duckdb.connect()
     rel = con.execute(sql)
@@ -166,7 +190,14 @@ def main() -> None:
     ap.add_argument("--window-days", type=int, default=90)
     ap.add_argument("--top", type=int, default=100)
     ap.add_argument("--out", type=Path, default=DATA_DIR / "top_wallets.csv")
+    ap.add_argument("--resolutions", type=Path, default=None,
+                    help="resolutions.csv (token_id,settlement) for ground-truth PnL")
     args = ap.parse_args()
+
+    resolutions = args.resolutions
+    if resolutions is None:
+        default_res = DATA_DIR / "resolutions.csv"
+        resolutions = default_res if default_res.exists() else None
 
     rel = rank_wallets(
         args.trades,
@@ -175,6 +206,7 @@ def main() -> None:
         window_days=args.window_days,
         top_n=args.top,
         out_csv=args.out,
+        resolutions_csv=resolutions,
     )
     cols = [d[0] for d in rel.description]
     print("  ".join(cols))

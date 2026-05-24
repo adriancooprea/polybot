@@ -12,6 +12,7 @@ Only read endpoints are implemented here. Order placement lives in
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import httpx
@@ -94,3 +95,39 @@ class PolymarketClient:
         if r.status_code != 200:
             return None
         return float(r.json().get("mid", 0) or 0)
+
+    @staticmethod
+    def _parse_list(value) -> list[str]:
+        """Gamma returns ``outcomes``/``clobTokenIds`` as JSON-encoded strings."""
+        if isinstance(value, list):
+            return [str(v) for v in value]
+        if isinstance(value, str) and value:
+            try:
+                return [str(v) for v in json.loads(value)]
+            except json.JSONDecodeError:
+                return []
+        return []
+
+    def token_id_for(self, market: dict, outcome: str) -> str | None:
+        """Resolve the CLOB token id for a named outcome in a market."""
+        outcomes = self._parse_list(market.get("outcomes"))
+        token_ids = self._parse_list(market.get("clobTokenIds"))
+        if len(outcomes) != len(token_ids):
+            return None
+        target = outcome.strip().lower()
+        for name, tid in zip(outcomes, token_ids):
+            if name.strip().lower() == target:
+                return tid
+        return None
+
+    def outcome_price(self, market: dict, outcome: str) -> float | None:
+        """Current price of a named outcome from Gamma's ``outcomePrices``."""
+        outcomes = self._parse_list(market.get("outcomes"))
+        prices = self._parse_list(market.get("outcomePrices"))
+        if len(outcomes) != len(prices):
+            return None
+        target = outcome.strip().lower()
+        for name, px in zip(outcomes, prices):
+            if name.strip().lower() == target:
+                return float(px)
+        return None

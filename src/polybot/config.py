@@ -25,15 +25,22 @@ class Config:
     polymarket_api_secret: str = os.getenv("POLYMARKET_API_SECRET", "")
     polymarket_passphrase: str = os.getenv("POLYMARKET_PASSPHRASE", "")
     wallet_private_key: str = os.getenv("POLYMARKET_WALLET_PRIVATE_KEY", "")
+    funder: str = os.getenv("POLYMARKET_FUNDER", "")
+    signature_type: int = int(os.getenv("POLYMARKET_SIGNATURE_TYPE", "1"))
+    chain_id: int = int(os.getenv("POLYMARKET_CHAIN_ID", "137"))
 
     max_trades_per_day: int = int(os.getenv("MAX_TRADES_PER_DAY", "10"))
     agreement_window_minutes: int = int(os.getenv("AGREEMENT_WINDOW_MINUTES", "30"))
     min_wallets_agree: int = int(os.getenv("MIN_WALLETS_AGREE", "2"))
 
     take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "0.15"))
+    stake_usd: float = float(os.getenv("STAKE_USD", "20"))
+    start_bankroll: float = float(os.getenv("START_BANKROLL", "200"))
+    poll_seconds: int = int(os.getenv("POLL_SECONDS", "60"))
     dry_run: bool = _bool("DRY_RUN", True)
 
     top_wallets_csv: Path = DATA_DIR / "top_wallets.csv"
+    open_trades_json: Path = DATA_DIR / "open_trades.json"
 
 
 CONFIG = Config()

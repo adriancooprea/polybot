@@ -28,16 +28,32 @@ One command on Linux/macOS — bootstraps a virtualenv, installs deps, runs:
 ```bash
 git clone git@github.com:adriancooprea/polybot.git
 cd polybot
-./run.sh download    # 1. fetch the 86M-trade dataset (~GBs, into data/)
-./run.sh rank        # 2. rank wallets -> data/top_wallets.csv
-./run.sh monitor     # 3. watch top wallets, print consensus signals
-./run.sh             # full bot: monitor -> Claude vote -> trade -> exit
-./run.sh dashboard   # Matrix terminal dashboard
+./run.sh download      # 1. fetch the 86M-trade dataset (~GBs, into data/)
+./run.sh resolutions   # (optional) ground-truth outcomes for accurate PnL
+./run.sh rank          # 2. rank wallets -> data/top_wallets.csv
+./run.sh monitor       # 3. watch top wallets, print consensus signals
+./run.sh doctor        # check config/readiness before going live
+./run.sh               # full bot: monitor -> Claude vote -> trade -> exit
+./run.sh dashboard     # Matrix terminal dashboard
 ```
 
 First run copies `.env.example` → `.env`. Add your `ANTHROPIC_API_KEY` and
-Polymarket keys there. Trading defaults to **dry-run** (`DRY_RUN=true`); set it
-to `false` only when you mean it. `touch data/KILL` is the kill-switch.
+Polymarket keys there.
+
+### Going live
+
+Trading defaults to **dry-run** (`DRY_RUN=true`) — orders are logged, never sent.
+To arm real trading, in `.env`:
+
+1. Set `POLYMARKET_WALLET_PRIVATE_KEY` and `POLYMARKET_FUNDER` (the address
+   holding your USDC), and `POLYMARKET_SIGNATURE_TYPE` (1 = email/Magic, 0 = EOA).
+2. Set token allowances on Polymarket first (EOA/MetaMask users).
+3. Set `DRY_RUN=false`. Run `./run.sh doctor` to confirm.
+
+Orders route through `py-clob-client` as market FOK orders. Safety rails always
+on: `MAX_TRADES_PER_DAY` cap (entries only), and `touch data/KILL` halts all
+trading instantly. Open positions persist to `data/open_trades.json` and resume
+after a restart.
 
 ## Stack
 
