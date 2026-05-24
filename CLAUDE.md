@@ -8,6 +8,37 @@ Guidance for Claude Code working in this repo.
 wallets by proven performance, monitors the top ones, and copies positions only
 when multiple top wallets agree within a 30-minute window. Hard cap: 10 trades/day.
 
+## Current status (2026-05-24)
+
+Code-complete and verified end-to-end in dry-run against live APIs. What's proven:
+
+- Data layer (Gamma markets, Data API activity/positions, CLOB midpoint) — live,
+  field shapes confirmed.
+- Dataset: poly_data S3 snapshot is **raw `orderFilled`** (not `processed/trades.csv`);
+  spans 2022-11 → 2025-10, ~151M rows, 6.24 GB xz / ~37 GB csv. Ranker consumes
+  `orderFilled` directly and was validated on real rows (prices 100% in [0,1]).
+- `maker`/`taker` in the dataset == `proxyWallet` in the Data API (same address
+  space) — ranker output feeds the monitor correctly.
+- Claude vote works (ENTER + SKIP) on the real Opus model.
+- Full dry-run pipeline runs: signal → vote → token resolution → risk-gated
+  execute → state persistence → exit evaluation.
+
+**Open blocker — live order submission.** Polymarket migrated to CLOB V2 on
+2026-04-28 (legacy `py-clob-client` is dead → we use `py-clob-client-v2`). New
+accounts are EIP-7702 **deposit wallets** using `signature_type=3` (POLY_1271).
+The V2 SDK currently can't post orders for these: its L1 auth binds the API key
+to the EOA, not the deposit wallet, so POSTs are rejected ("maker address not
+allowed" / "Could not create api key"). Balance/allowance reads work. Tracked
+upstream: py-clob-client-v2 issues #65/#70/#71. **Funds + allowances are ready;**
+flip `DRY_RUN=false` once upstream ships the fix. Until then: dry-run, or trade
+manually on the site.
+
+### Pick up here (e.g. on a bigger machine)
+
+Full ranking over ~151M rows needs ~60 GB+ free (csv + DuckDB spill). To produce
+the ranked list: `./run.sh download && ./run.sh resolutions && ./run.sh rank`,
+then copy `data/top_wallets.csv` to wherever the live bot runs.
+
 ## Architecture (intended)
 
 Pipeline of independent stages, each runnable in isolation:
@@ -62,7 +93,7 @@ Pipeline → module map:
 - decide  → `decide/consensus.py` (Claude risk-gate vote)
 - execute → `execute/executor.py` (caps + kill-switch + live routing),
             `execute/exit_rules.py`
-- trade   → `polymarket/client.py` (read), `polymarket/clob.py` (live orders)
+- trade   → `polymarket/client.py` (read), `polymarket/clob.py` (live orders, V2)
 - state   → `state.py` (open-trade persistence -> data/open_trades.json)
 - bot     → `bot.py` (orchestrator), `cli.py` (CLI)
 
