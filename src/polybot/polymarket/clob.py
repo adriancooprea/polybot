@@ -47,16 +47,13 @@ class TradeClient:
         client = ClobClient(**kw)
 
         if CONFIG.polymarket_api_key and CONFIG.polymarket_api_secret and CONFIG.polymarket_passphrase:
-            # Pre-supplied L2 creds (e.g. the website's deposit-wallet-bound key).
-            # For sig_type=3 deposit wallets the L2 POLY_ADDRESS header must be the
-            # deposit wallet (the key is bound to it, and orders set signer=funder),
-            # so bind the signer's reported address to the funder. The EOA still
-            # signs orders/HMAC — only the advertised address changes.
-            # Works around py-clob-client-v2 #65/#70/#71 (can't mint a deposit-wallet
-            # key via the SDK; we reuse one that already exists).
-            if CONFIG.signature_type == 3 and CONFIG.funder:
-                funder = CONFIG.funder
-                client.signer.address = lambda: funder  # noqa: E731
+            # Pre-supplied L2 creds. For a Polymarket deposit-wallet account
+            # (sig_type=3), POLYMARKET_FUNDER must be the **API wallet** (the
+            # "for API use only" address the CLOB credits your deposit to), NOT
+            # the deposit address you send USDC to. Then order.signer == maker ==
+            # funder == the API-key's address, which the exchange requires; the
+            # EOA still produces the actual signature (validated via EIP-1271).
+            # L2 auth uses the EOA address by default — do NOT override it.
             client.set_api_creds(ApiCreds(
                 api_key=CONFIG.polymarket_api_key,
                 api_secret=CONFIG.polymarket_api_secret,
