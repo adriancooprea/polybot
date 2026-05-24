@@ -40,6 +40,17 @@ def _whale_position_sizes(pm: PolymarketClient, market_id: str,
     return sizes
 
 
+def _held_shares(pm: PolymarketClient, token_id: str) -> float:
+    """Shares of ``token_id`` actually held by our funder — post-fill ground truth."""
+    try:
+        for p in pm.positions(CONFIG.funder):
+            if str(p.get("asset", "")) == token_id:
+                return float(p.get("size", 0) or 0)
+    except Exception:
+        pass
+    return 0.0
+
+
 def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
                    store: TradeStore, anthropic: Anthropic | None) -> None:
     if store.has(sig.market_id):
@@ -65,12 +76,22 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
         print(f"   skip: could not resolve token_id for outcome '{sig.outcome}'")
         return
 
-    price = pm.outcome_price(market, sig.outcome) or sig.avg_price
+    # Price off the live CLOB midpoint — Gamma's outcomePrices can be badly stale.
+    mid = pm.midpoint(token_id)
+    price = mid if mid and mid > 0 else (pm.outcome_price(market, sig.outcome) or sig.avg_price)
+
+    # Anti-chase: by the time consensus -> vote -> execute completes, the price may
+    # have run away from where the smart wallets entered. Don't buy the top.
+    if sig.avg_price > 0 and price > sig.avg_price * (1 + CONFIG.max_chase_pct):
+        print(f"   skip: price {price:.3f} ran {((price / sig.avg_price) - 1) * 100:.0f}% "
+              f"past consensus {sig.avg_price:.3f} (chasing)")
+        return
+
     stake = CONFIG.stake_usd
     shares = stake / price if price > 0 else 0.0
 
     try:
-        executor.place(Order(
+        status = executor.place(Order(
             market_id=sig.market_id, outcome=sig.outcome, side="BUY",
             size_usd=stake, price=price, reason=f"consensus:{len(sig.wallets)}",
             token_id=token_id, shares=shares,
@@ -79,9 +100,19 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
         print(f"   blocked: {e}")
         return
 
+    # Record the ACTUAL filled size as ground truth (a market FOK can fill away
+    # from the midpoint). Effective cost basis = stake / shares actually held, so
+    # take-profit/stop-loss measure against what we really paid.
+    entry_price, entry_shares = price, shares
+    if status == "FILLED":
+        held = _held_shares(pm, token_id)
+        if held > 0:
+            entry_shares = held
+            entry_price = stake / held
+
     store.add(OpenTrade(
         market_id=sig.market_id, token_id=token_id, outcome=sig.outcome,
-        title=sig.title, entry_price=price, shares=shares, stake_usd=stake,
+        title=sig.title, entry_price=entry_price, shares=entry_shares, stake_usd=stake,
         trigger_wallets=list(sig.wallets),
         baseline_size=_whale_position_sizes(pm, sig.market_id, sig.wallets),
     ))

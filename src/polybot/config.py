@@ -34,6 +34,9 @@ class Config:
     min_wallets_agree: int = int(os.getenv("MIN_WALLETS_AGREE", "2"))
 
     take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "0.15"))
+    stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.30"))
+    # don't enter if the executable price has run more than this past consensus
+    max_chase_pct: float = float(os.getenv("MAX_CHASE_PCT", "0.10"))
     stake_usd: float = float(os.getenv("STAKE_USD", "20"))
     start_bankroll: float = float(os.getenv("START_BANKROLL", "200"))
     poll_seconds: int = int(os.getenv("POLL_SECONDS", "60"))

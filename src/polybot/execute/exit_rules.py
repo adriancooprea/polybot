@@ -3,7 +3,9 @@
 A position closes on whichever fires first:
 
 1. **Take-profit**: unrealized PnL >= ``TAKE_PROFIT_PCT`` (default 15%).
-2. **Whale exodus**: the top wallets that triggered the entry start *reducing*
+2. **Stop-loss**: unrealized PnL <= ``-STOP_LOSS_PCT`` (default 30%) — cap the
+   downside so a losing position can't ride to zero.
+3. **Whale exodus**: the top wallets that triggered the entry start *reducing*
    their position size in this market.
 
 Exiting before the crowd reverses is what separates this from naive copy-trading.
@@ -27,6 +29,12 @@ def take_profit_hit(entry_price: float, current_price: float, threshold: float) 
     if entry_price <= 0:
         return False
     return (current_price - entry_price) / entry_price >= threshold
+
+
+def stop_loss_hit(entry_price: float, current_price: float, threshold: float) -> bool:
+    if entry_price <= 0:
+        return False
+    return (current_price - entry_price) / entry_price <= -threshold
 
 
 def whales_reducing(
@@ -65,10 +73,13 @@ def evaluate_exit(
     trigger_wallets: tuple[str, ...],
     baseline_size: dict[str, float],
     take_profit_pct: float = CONFIG.take_profit_pct,
+    stop_loss_pct: float = CONFIG.stop_loss_pct,
 ) -> ExitDecision:
-    """Apply both rules; first match wins."""
+    """Apply all rules; first match wins."""
     if take_profit_hit(entry_price, current_price, take_profit_pct):
         return ExitDecision(True, "take_profit")
+    if stop_loss_hit(entry_price, current_price, stop_loss_pct):
+        return ExitDecision(True, "stop_loss")
     if whales_reducing(client, market_id, trigger_wallets, baseline_size=baseline_size):
         return ExitDecision(True, "whale_exodus")
     return ExitDecision(False, "hold")
