@@ -38,16 +38,35 @@ class TradeClient:
     def __init__(self) -> None:
         if not CONFIG.wallet_private_key:
             raise RuntimeError("POLYMARKET_WALLET_PRIVATE_KEY required for live trading")
-        from py_clob_client_v2 import ClobClient
+        from py_clob_client_v2 import ApiCreds, ClobClient
 
         kw = dict(host=HOST, chain_id=CONFIG.chain_id, key=CONFIG.wallet_private_key,
                   signature_type=CONFIG.signature_type)
         if CONFIG.funder:
             kw["funder"] = CONFIG.funder
-        # L1 client -> derive L2 API creds -> fully authenticated client
-        bootstrap = ClobClient(**kw)
-        creds = bootstrap.create_or_derive_api_key()
-        self._client = ClobClient(creds=creds, **kw)
+        client = ClobClient(**kw)
+
+        if CONFIG.polymarket_api_key and CONFIG.polymarket_api_secret and CONFIG.polymarket_passphrase:
+            # Pre-supplied L2 creds (e.g. the website's deposit-wallet-bound key).
+            # For sig_type=3 deposit wallets the L2 POLY_ADDRESS header must be the
+            # deposit wallet (the key is bound to it, and orders set signer=funder),
+            # so bind the signer's reported address to the funder. The EOA still
+            # signs orders/HMAC — only the advertised address changes.
+            # Works around py-clob-client-v2 #65/#70/#71 (can't mint a deposit-wallet
+            # key via the SDK; we reuse one that already exists).
+            if CONFIG.signature_type == 3 and CONFIG.funder:
+                funder = CONFIG.funder
+                client.signer.address = lambda: funder  # noqa: E731
+            client.set_api_creds(ApiCreds(
+                api_key=CONFIG.polymarket_api_key,
+                api_secret=CONFIG.polymarket_api_secret,
+                api_passphrase=CONFIG.polymarket_passphrase,
+            ))
+        else:
+            # No creds supplied: derive them (works for EOA wallets; for sig_type=3
+            # deposit wallets this binds to the EOA and order POSTs are rejected).
+            client.set_api_creds(client.create_or_derive_api_key())
+        self._client = client
 
     def _tick(self, token_id: str) -> str:
         try:

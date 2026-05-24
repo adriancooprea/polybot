@@ -49,6 +49,10 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
           f"| {len(sig.wallets)} wallets")
 
     market = pm.market(sig.market_id)
+    if not isinstance(market, dict) or not market:
+        # Gamma returns [] for archived/unknown markets (e.g. long-resolved ones)
+        print(f"   skip: no market metadata for {sig.market_id}")
+        return
     if anthropic is not None:
         vote = vote_on_signal(sig, market, client=anthropic)
         print(f"   Claude: {'ENTER' if vote.enter else 'SKIP'} "
