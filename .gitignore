@@ -1,0 +1,26 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Data (local trade stores, dumps, caches)
+data/
+*.db
+*.sqlite
+*.parquet
+*.csv
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
