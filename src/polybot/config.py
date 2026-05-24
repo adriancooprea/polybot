@@ -1,0 +1,39 @@
+"""Central config, loaded from environment (.env)."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = ROOT / "data"
+
+
+def _bool(name: str, default: bool) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class Config:
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    polymarket_api_key: str = os.getenv("POLYMARKET_API_KEY", "")
+    polymarket_api_secret: str = os.getenv("POLYMARKET_API_SECRET", "")
+    polymarket_passphrase: str = os.getenv("POLYMARKET_PASSPHRASE", "")
+    wallet_private_key: str = os.getenv("POLYMARKET_WALLET_PRIVATE_KEY", "")
+
+    max_trades_per_day: int = int(os.getenv("MAX_TRADES_PER_DAY", "10"))
+    agreement_window_minutes: int = int(os.getenv("AGREEMENT_WINDOW_MINUTES", "30"))
+    min_wallets_agree: int = int(os.getenv("MIN_WALLETS_AGREE", "2"))
+
+    take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "0.15"))
+    dry_run: bool = _bool("DRY_RUN", True)
+
+    top_wallets_csv: Path = DATA_DIR / "top_wallets.csv"
+
+
+CONFIG = Config()

@@ -19,6 +19,8 @@ data/
 *.sqlite
 *.parquet
 *.csv
+*.xz
+*.tar
 
 # OS / editor
 .DS_Store

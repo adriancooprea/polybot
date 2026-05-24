@@ -21,9 +21,23 @@ short window.
 5. **Execute** — place the trade. Hard cap of **10 trades/day**. The discipline
    is the edge; overtrading is how accounts die.
 
-## Status
+## Quick start
 
-Scaffolding. Implementation steps to follow.
+One command on Linux/macOS — bootstraps a virtualenv, installs deps, runs:
+
+```bash
+git clone git@github.com:adriancooprea/polybot.git
+cd polybot
+./run.sh download    # 1. fetch the 86M-trade dataset (~GBs, into data/)
+./run.sh rank        # 2. rank wallets -> data/top_wallets.csv
+./run.sh monitor     # 3. watch top wallets, print consensus signals
+./run.sh             # full bot: monitor -> Claude vote -> trade -> exit
+./run.sh dashboard   # Matrix terminal dashboard
+```
+
+First run copies `.env.example` → `.env`. Add your `ANTHROPIC_API_KEY` and
+Polymarket keys there. Trading defaults to **dry-run** (`DRY_RUN=true`); set it
+to `false` only when you mean it. `touch data/KILL` is the kill-switch.
 
 ## Stack
 

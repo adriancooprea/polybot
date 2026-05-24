@@ -7,7 +7,12 @@ dependencies = [
     "anthropic",
     "httpx",
     "python-dotenv",
+    "duckdb",
+    "rich",
 ]
+
+[project.scripts]
+polybot = "polybot.cli:main"
 
 [project.optional-dependencies]
 dev = [
