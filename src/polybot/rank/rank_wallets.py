@@ -1,26 +1,33 @@
 """Rank Polymarket wallets by win rate, profit, and consistency.
 
-Runs over the ~86M-row poly_data snapshot with DuckDB (out-of-core SQL — the
-CSV does not fit in RAM). Produces the top-N "smart money" wallets that become
-our signal sources downstream.
+Runs over the raw ``orderFilled`` snapshot from poly_data (~86M rows) with
+DuckDB (out-of-core SQL — the CSV does not fit in RAM). Produces the top-N
+"smart money" wallets that become our signal sources downstream.
+
+orderFilled schema
+------------------
+``timestamp, maker, makerAssetId, makerAmountFilled, taker, takerAssetId,
+takerAmountFilled, transactionHash``
+
+Each row is one on-chain fill. One side of the swap is USDC (``assetId = '0'``),
+the other is an outcome token. The party paying USDC is **buying** the token;
+the party giving the token is **selling**. Amounts are 6-decimal fixed point.
+Token ids are 77-digit integers, so they are read as VARCHAR.
 
 Pipeline
 --------
-1. Explode each trade into per-participant rows: every trade has a maker and a
-   taker, each with a BUY/SELL direction on an outcome token.
-2. Net each (wallet, market) position: tokens held and USD flow.
-3. Settle each position against the market's resolved outcome to get PnL.
+1. Normalize each fill into (token, buyer, seller, usd, tokens).
+2. Explode into signed per-wallet legs (buyer: +tokens/-usd, seller: -tokens/+usd).
+3. Net each (wallet, token) position; settle at resolution to get PnL.
 4. Aggregate per wallet: win rate, total profit, trade count, profit factor.
 5. Filter (min trades, min win rate, recency window) and take the top N.
 
-Resolution caveat
------------------
-The raw dataset does not carry an explicit "winning outcome" flag. We *infer*
-settlement: a token whose final observed trade price converged near 1.0 is
-treated as a winner (value 1), near 0.0 as a loser (value 0); anything in
-between (still-open / ambiguous markets) is excluded from PnL. Pass a
-``resolutions`` CSV (token_id,settlement) to override the heuristic with ground
-truth when you have it.
+Resolution
+----------
+Settlement = 1.0 for the winning token, 0.0 for the loser. By default we *infer*
+it from the token's final observed price (near 1 => win, near 0 => loss; markets
+still mid-range are excluded from PnL). Pass ``resolutions`` (token_id,settlement)
+to override with ground truth — token_id there matches the on-chain assetId.
 """
 
 from __future__ import annotations
@@ -31,10 +38,17 @@ from pathlib import Path
 import duckdb
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
-DEFAULT_TRADES = DATA_DIR / "processed" / "trades.csv"
+DEFAULT_TRADES = DATA_DIR / "orderFilled_complete.csv"
 
 WIN_PRICE = 0.95  # final price >= this => token settled to 1
 LOSE_PRICE = 0.05  # final price <= this => token settled to 0
+
+_READ = (
+    "read_csv('{path}', header=true, columns={{"
+    "'timestamp':'BIGINT','maker':'VARCHAR','makerAssetId':'VARCHAR',"
+    "'makerAmountFilled':'DOUBLE','taker':'VARCHAR','takerAssetId':'VARCHAR',"
+    "'takerAmountFilled':'DOUBLE','transactionHash':'VARCHAR'}})"
+)
 
 
 def build_sql(
@@ -51,6 +65,8 @@ def build_sql(
     If ``resolutions_csv`` is given, ground-truth settlement overrides the
     inferred final-price heuristic for any token present in that file.
     """
+    read = _READ.format(path=trades_csv)
+
     if resolutions_csv is not None:
         settlement_cte = f"""
 truth AS (
@@ -64,7 +80,7 @@ settlement AS (
                          WHEN lp.final_price <= {LOSE_PRICE} THEN 0.0
                          ELSE NULL END) AS settle
     FROM last_price lp
-    LEFT JOIN truth t ON CAST(lp.token AS VARCHAR) = t.token
+    LEFT JOIN truth t USING (token)
 ),"""
     else:
         settlement_cte = f"""
@@ -75,53 +91,54 @@ settlement AS (
                 ELSE NULL END AS settle
     FROM last_price
 ),"""
+
     return f"""
-WITH trades AS (
-    SELECT * FROM read_csv_auto('{trades_csv}', header=true)
+WITH raw AS (
+    SELECT * FROM {read}
+    WHERE makerAssetId = '0' OR takerAssetId = '0'   -- one leg must be USDC
 ),
--- recency: anchor the window to the newest trade in the data, not wall-clock,
--- so the ranker is deterministic against a static snapshot.
-bounds AS (
-    SELECT max(timestamp) AS max_ts FROM trades
+-- normalize every fill: who bought the token, who sold, for how much
+fills_all AS (
+    SELECT timestamp,
+           CASE WHEN makerAssetId = '0' THEN takerAssetId ELSE makerAssetId END AS token,
+           CASE WHEN makerAssetId = '0' THEN maker ELSE taker END AS buyer,
+           CASE WHEN makerAssetId = '0' THEN taker ELSE maker END AS seller,
+           (CASE WHEN makerAssetId = '0' THEN makerAmountFilled ELSE takerAmountFilled END)
+               / 1e6 AS usd,
+           (CASE WHEN makerAssetId = '0' THEN takerAmountFilled ELSE makerAmountFilled END)
+               / 1e6 AS tokens
+    FROM raw
 ),
-recent AS (
-    SELECT t.*
-    FROM trades t, bounds b
-    WHERE t.timestamp >= b.max_ts - CAST({window_days} AS BIGINT) * 86400
-),
--- one row per (wallet, token) per trade, signed by direction
-legs AS (
-    SELECT maker AS wallet, market_id, makerAssetId AS token, timestamp,
-           CASE WHEN maker_direction = 'BUY' THEN token_amount ELSE -token_amount END AS tokens,
-           CASE WHEN maker_direction = 'BUY' THEN -usd_amount ELSE usd_amount END AS usd
-    FROM recent
-    UNION ALL
-    SELECT taker AS wallet, market_id, takerAssetId AS token, timestamp,
-           CASE WHEN taker_direction = 'BUY' THEN token_amount ELSE -token_amount END AS tokens,
-           CASE WHEN taker_direction = 'BUY' THEN -usd_amount ELSE usd_amount END AS usd
-    FROM recent
-),
--- infer settlement per token from its final observed price
+-- final observed price per token, over ALL history (for settlement inference)
 last_price AS (
-    SELECT token, arg_max(price, timestamp) AS final_price
-    FROM (
-        SELECT makerAssetId AS token, price, timestamp FROM trades
-        UNION ALL
-        SELECT takerAssetId AS token, price, timestamp FROM trades
-    )
+    SELECT token, arg_max(usd / tokens, timestamp) AS final_price
+    FROM fills_all
+    WHERE tokens > 0
     GROUP BY token
 ),{settlement_cte}
--- net each wallet's position per token, then realize PnL at settlement
+-- recency window anchored to newest fill (deterministic vs a static snapshot)
+bounds AS (SELECT max(timestamp) AS max_ts FROM fills_all),
+fills AS (
+    SELECT f.* FROM fills_all f, bounds b
+    WHERE f.timestamp >= b.max_ts - CAST({window_days} AS BIGINT) * 86400
+      AND f.tokens > 0
+),
+-- signed per-wallet legs
+legs AS (
+    SELECT buyer AS wallet, token, tokens AS tokens, -usd AS usd FROM fills
+    UNION ALL
+    SELECT seller AS wallet, token, -tokens AS tokens, usd AS usd FROM fills
+),
 positions AS (
-    SELECT l.wallet, l.market_id, l.token,
-           sum(l.tokens) AS net_tokens,
-           sum(l.usd) AS net_usd,
+    SELECT wallet, token,
+           sum(tokens) AS net_tokens,
+           sum(usd) AS net_usd,
            count(*) AS n_legs
-    FROM legs l
-    GROUP BY l.wallet, l.market_id, l.token
+    FROM legs
+    GROUP BY wallet, token
 ),
 pnl AS (
-    SELECT p.wallet, p.market_id, p.n_legs,
+    SELECT p.wallet, p.n_legs,
            p.net_usd + p.net_tokens * s.settle AS profit
     FROM positions p
     JOIN settlement s USING (token)
@@ -184,7 +201,8 @@ def rank_wallets(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Rank Polymarket wallets by performance.")
-    ap.add_argument("--trades", type=Path, default=DEFAULT_TRADES, help="processed trades.csv")
+    ap.add_argument("--trades", type=Path, default=DEFAULT_TRADES,
+                    help="orderFilled_complete.csv from `polybot download`")
     ap.add_argument("--min-trades", type=int, default=50)
     ap.add_argument("--min-win-rate", type=float, default=0.60)
     ap.add_argument("--window-days", type=int, default=90)
