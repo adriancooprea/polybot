@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import time
 
-from anthropic import Anthropic
-
 from .config import CONFIG
 from .decide.consensus import vote_on_signal
 from .execute.executor import Executor, Order, RiskError
@@ -52,7 +50,7 @@ def _held_shares(pm: PolymarketClient, token_id: str) -> float:
 
 
 def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
-                   store: TradeStore, anthropic: Anthropic | None) -> None:
+                   store: TradeStore) -> None:
     if store.has(sig.market_id):
         return  # already holding this market
 
@@ -64,12 +62,12 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
         # Gamma returns [] for archived/unknown markets (e.g. long-resolved ones)
         print(f"   skip: no market metadata for {sig.market_id}")
         return
-    if anthropic is not None:
-        vote = vote_on_signal(sig, market, client=anthropic)
-        print(f"   Claude: {'ENTER' if vote.enter else 'SKIP'} "
-              f"({vote.confidence:.0%}) — {vote.reason}")
-        if not vote.enter:
-            return
+
+    vote = vote_on_signal(sig, market)  # web-grounded gate (Claude Code / API)
+    print(f"   Claude: {'ENTER' if vote.enter else 'SKIP'} "
+          f"({vote.confidence:.0%}) — {vote.reason}")
+    if not vote.enter:
+        return
 
     token_id = pm.token_id_for(market, sig.outcome)
     if not token_id:
@@ -158,7 +156,6 @@ def run() -> None:
         pass
 
     wallets = load_top_wallets()
-    anthropic = Anthropic(api_key=CONFIG.anthropic_api_key) if CONFIG.anthropic_api_key else None
     store = TradeStore()
 
     with PolymarketClient() as pm:
@@ -174,7 +171,7 @@ def run() -> None:
             try:
                 sigs = monitor.poll_once()
                 for sig in sigs:
-                    _handle_signal(sig, pm, executor, store, anthropic)
+                    _handle_signal(sig, pm, executor, store)
                 _handle_exits(pm, executor, store)
                 polls += 1
                 if polls % 10 == 0:  # ~every 10 cycles
