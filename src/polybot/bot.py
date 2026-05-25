@@ -64,13 +64,6 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
         print(f"   skip: no market metadata for {sig.market_id}")
         return
 
-    vote = vote_on_signal(sig, market)  # web-grounded gate (Claude Code / API)
-    print(f"   Claude: {'ENTER' if vote.enter else 'SKIP'} "
-          f"({vote.confidence:.0%}) — {vote.reason}")
-    journal.log_decision(sig, vote, market)  # record every vote (ENTER + SKIP) for later analysis
-    if not vote.enter:
-        return
-
     token_id = pm.token_id_for(market, sig.outcome)
     if not token_id:
         print(f"   skip: could not resolve token_id for outcome '{sig.outcome}'")
@@ -80,11 +73,23 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
     mid = pm.midpoint(token_id)
     price = mid if mid and mid > 0 else (pm.outcome_price(market, sig.outcome) or sig.avg_price)
 
-    # Anti-chase: by the time consensus -> vote -> execute completes, the price may
-    # have run away from where the smart wallets entered. Don't buy the top.
+    # CHEAP guards BEFORE the (slow, ~30s) web vote — don't spend a vote on a
+    # signal the guards would reject anyway.
+    # Near-resolved: market effectively decided, no edge.
+    if price >= 0.95 or price <= 0.05:
+        print(f"   skip: near-resolved (price {price:.3f}) — no vote")
+        return
+    # Anti-chase: price already ran past where the smart wallets entered.
     if sig.avg_price > 0 and price > sig.avg_price * (1 + CONFIG.max_chase_pct):
         print(f"   skip: price {price:.3f} ran {((price / sig.avg_price) - 1) * 100:.0f}% "
-              f"past consensus {sig.avg_price:.3f} (chasing)")
+              f"past consensus {sig.avg_price:.3f} (chasing) — no vote")
+        return
+
+    vote = vote_on_signal(sig, market)  # web-grounded gate (Claude Code / API)
+    print(f"   Claude: {'ENTER' if vote.enter else 'SKIP'} "
+          f"({vote.confidence:.0%}) — {vote.reason}")
+    journal.log_decision(sig, vote, market)  # record every vote (ENTER + SKIP) for later analysis
+    if not vote.enter:
         return
 
     stake = CONFIG.stake_usd

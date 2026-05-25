@@ -32,6 +32,8 @@ class Config:
     max_trades_per_day: int = int(os.getenv("MAX_TRADES_PER_DAY", "10"))
     agreement_window_minutes: int = int(os.getenv("AGREEMENT_WINDOW_MINUTES", "30"))
     min_wallets_agree: int = int(os.getenv("MIN_WALLETS_AGREE", "2"))
+    # ignore wallet trades older than this — kills stale/resolved-market signals
+    max_signal_age_minutes: int = int(os.getenv("MAX_SIGNAL_AGE_MINUTES", "60"))
 
     take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "0.15"))
     stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.30"))

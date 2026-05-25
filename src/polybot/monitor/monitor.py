@@ -64,11 +64,13 @@ class Monitor:
         *,
         min_agree: int = CONFIG.min_wallets_agree,
         window_minutes: int = CONFIG.agreement_window_minutes,
+        max_age_minutes: int = CONFIG.max_signal_age_minutes,
     ) -> None:
         self.wallets = [w.lower() for w in wallets]
         self.client = client
         self.min_agree = min_agree
         self.horizon_s = window_minutes * 60
+        self.max_age_s = max_age_minutes * 60
         self._seen_tx: set[str] = set()
         self._windows: dict[tuple[str, str], _Window] = defaultdict(_Window)
         self._fired: set[tuple[str, str, frozenset]] = set()
@@ -78,6 +80,11 @@ class Monitor:
             self._seen_tx.add(act.tx_hash)
             return None
         self._seen_tx.add(act.tx_hash)
+
+        # Recency: ignore stale trades (old/resolved-market history) — we only want
+        # fresh consensus forming now, not finished games from the wallets' backlog.
+        if act.timestamp < time.time() - self.max_age_s:
+            return None
 
         key = (act.market_id, act.outcome)
         win = self._windows[key]
