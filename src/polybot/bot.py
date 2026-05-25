@@ -149,6 +149,14 @@ def _handle_exits(pm: PolymarketClient, executor: Executor, store: TradeStore) -
 
 
 def run() -> None:
+    import sys
+    # Line-buffer stdout so the log is live even when redirected to a file
+    # (default block-buffering hides output until ~4KB accumulates).
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
     wallets = load_top_wallets()
     anthropic = Anthropic(api_key=CONFIG.anthropic_api_key) if CONFIG.anthropic_api_key else None
     store = TradeStore()
@@ -158,12 +166,20 @@ def run() -> None:
         executor = Executor()
         print(f"polybot live | dry_run={CONFIG.dry_run} | cap={CONFIG.max_trades_per_day}/day "
               f"| resuming {len(store.all())} open trade(s)")
+        # heartbeat so 'is it alive?' is answerable from the log
+        import datetime as _dt
+        polls = 0
 
         while True:
             try:
-                for sig in monitor.poll_once():
+                sigs = monitor.poll_once()
+                for sig in sigs:
                     _handle_signal(sig, pm, executor, store, anthropic)
                 _handle_exits(pm, executor, store)
+                polls += 1
+                if polls % 10 == 0:  # ~every 10 cycles
+                    print(f"  [{_dt.datetime.now():%H:%M:%S}] alive — {polls} polls, "
+                          f"{len(store.all())} open")
             except Exception as exc:  # never let one bad cycle kill the loop
                 print(f"  ! cycle error (continuing): {exc}")
             time.sleep(CONFIG.poll_seconds)
