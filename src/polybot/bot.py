@@ -134,13 +134,22 @@ def _handle_exits(pm: PolymarketClient, executor: Executor, store: TradeStore) -
         )
         if not decision.should_exit:
             continue
+        # Sell the ACTUAL held shares (floored), not the recorded count — a FAK
+        # fill can leave slightly fewer shares than stake/price, and selling more
+        # than held is rejected ("not enough balance").
+        import math
+        held = _held_shares(pm, trade.token_id)
+        sell_shares = math.floor(held * 100) / 100.0
+        if sell_shares <= 0:  # position already gone (dust / already sold)
+            store.remove(market_id)
+            continue
         try:
             executor.place(Order(
                 market_id=market_id, outcome=trade.outcome, side="SELL",
-                size_usd=trade.shares * current, price=current,
-                reason=decision.reason, token_id=trade.token_id, shares=trade.shares,
+                size_usd=sell_shares * current, price=current,
+                reason=decision.reason, token_id=trade.token_id, shares=sell_shares,
             ))
-            print(f"   exit {trade.title[:32]} ({decision.reason})")
+            print(f"   exit {trade.title[:32]} ({decision.reason}) — sold {sell_shares}")
             store.remove(market_id)
         except RiskError as e:
             print(f"   exit blocked: {e}")
