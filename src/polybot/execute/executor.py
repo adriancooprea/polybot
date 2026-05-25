@@ -75,6 +75,24 @@ class Executor:
             self._trade_client = TradeClient()
         return self._trade_client
 
+    def last_fill_price(self, token_id: str, side: str) -> float | None:
+        """Actual price of our most recent fill on ``token_id`` for ``side`` (live only).
+
+        Reads the CLOB's authoritative trade record so the journal logs real fills
+        (which can slip far from the midpoint on thin books), not the intended price.
+        """
+        if self.dry_run or self._trade_client is None:
+            return None
+        try:
+            tr = self._trade_client._client.get_trades()
+            rows = tr.get("data", tr) if isinstance(tr, dict) else tr
+            for t in rows or []:
+                if str(t.get("asset_id")) == token_id and str(t.get("side", "")).upper() == side.upper():
+                    return float(t.get("price", 0) or 0)
+        except Exception:
+            pass
+        return None
+
     def _check_risk(self, order: Order) -> None:
         if KILL_FILE.exists():
             raise RiskError(f"kill-switch active ({KILL_FILE})")

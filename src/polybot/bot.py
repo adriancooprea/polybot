@@ -151,9 +151,12 @@ def _handle_exits(pm: PolymarketClient, executor: Executor, store: TradeStore) -
                 size_usd=sell_shares * current, price=current,
                 reason=decision.reason, token_id=trade.token_id, shares=sell_shares,
             ))
-            pnl = journal.log_close(trade, exit_price=current,
+            # Journal the ACTUAL fill price (thin books slip hard from the midpoint);
+            # fall back to the midpoint only if we can't read the real fill.
+            exit_px = executor.last_fill_price(trade.token_id, "SELL") or current
+            pnl = journal.log_close(trade, exit_price=exit_px,
                                     exit_reason=decision.reason, shares_sold=sell_shares)
-            print(f"   exit {trade.title[:32]} ({decision.reason}) — sold {sell_shares} | PnL ${pnl:+.2f}")
+            print(f"   exit {trade.title[:32]} ({decision.reason}) — sold {sell_shares} @ {exit_px:.3f} | PnL ${pnl:+.2f}")
             store.remove(market_id)
         except RiskError as e:
             print(f"   exit blocked: {e}")
@@ -182,10 +185,15 @@ def run() -> None:
 
         while True:
             try:
-                sigs = monitor.poll_once()
-                for sig in sigs:
-                    _handle_signal(sig, pm, executor, store)
+                # Exits FIRST and BETWEEN signals — each ENTER vote takes ~30s, so
+                # checking exits only after the whole signal batch starved them and
+                # let profitable positions sit unlocked. Open positions are few, so
+                # re-checking is cheap.
                 _handle_exits(pm, executor, store)
+                for sig in monitor.poll_once():
+                    if store.all():
+                        _handle_exits(pm, executor, store)
+                    _handle_signal(sig, pm, executor, store)
                 polls += 1
                 if polls % 10 == 0:  # ~every 10 cycles
                     print(f"  [{_dt.datetime.now():%H:%M:%S}] alive — {polls} polls, "
