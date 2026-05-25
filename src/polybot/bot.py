@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import time
 
+from . import journal
 from .config import CONFIG
 from .decide.consensus import vote_on_signal
 from .execute.executor import Executor, Order, RiskError
@@ -66,6 +67,7 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
     vote = vote_on_signal(sig, market)  # web-grounded gate (Claude Code / API)
     print(f"   Claude: {'ENTER' if vote.enter else 'SKIP'} "
           f"({vote.confidence:.0%}) — {vote.reason}")
+    journal.log_decision(sig, vote, market)  # record every vote (ENTER + SKIP) for later analysis
     if not vote.enter:
         return
 
@@ -149,7 +151,9 @@ def _handle_exits(pm: PolymarketClient, executor: Executor, store: TradeStore) -
                 size_usd=sell_shares * current, price=current,
                 reason=decision.reason, token_id=trade.token_id, shares=sell_shares,
             ))
-            print(f"   exit {trade.title[:32]} ({decision.reason}) — sold {sell_shares}")
+            pnl = journal.log_close(trade, exit_price=current,
+                                    exit_reason=decision.reason, shares_sold=sell_shares)
+            print(f"   exit {trade.title[:32]} ({decision.reason}) — sold {sell_shares} | PnL ${pnl:+.2f}")
             store.remove(market_id)
         except RiskError as e:
             print(f"   exit blocked: {e}")

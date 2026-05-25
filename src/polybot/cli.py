@@ -29,6 +29,7 @@ def main() -> None:
     stub("run", "run the full trading bot")
     stub("dashboard", "launch the terminal dashboard")
     stub("doctor", "preflight check of config and data files")
+    stub("report", "analyze recorded trade history (offline)")
     # let subcommands keep their own argparse flags (e.g. rank --top)
     args, rest = ap.parse_known_args()
     import sys
@@ -48,6 +49,8 @@ def main() -> None:
         from .bot import run as f
     elif args.cmd == "dashboard":
         from .dashboard.dashboard import run as f
+    elif args.cmd == "report":
+        from .journal import main as f
     elif args.cmd == "doctor":
         f = _doctor
     else:  # unreachable; argparse enforces choices
