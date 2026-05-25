@@ -100,15 +100,24 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
         print(f"   blocked: {e}")
         return
 
-    # Record the ACTUAL filled size as ground truth (a market FOK can fill away
-    # from the midpoint). Effective cost basis = stake / shares actually held, so
-    # take-profit/stop-loss measure against what we really paid.
+    # Confirm the fill actually happened before tracking. A market order can come
+    # back "delayed"/success yet never match — tracking it would create a phantom
+    # position. For live orders, require real shares held (brief retry for the
+    # data-API lag); use the actual holdings as the cost basis. Dry-run keeps the
+    # estimate.
     entry_price, entry_shares = price, shares
     if status == "FILLED":
-        held = _held_shares(pm, token_id)
-        if held > 0:
-            entry_shares = held
-            entry_price = stake / held
+        held = 0.0
+        for _ in range(4):
+            held = _held_shares(pm, token_id)
+            if held > 0:
+                break
+            time.sleep(1.5)
+        if held <= 0:
+            print(f"   entry not confirmed (no shares held) — not tracking {sig.outcome}")
+            return
+        entry_shares = held
+        entry_price = stake / held
 
     store.add(OpenTrade(
         market_id=sig.market_id, token_id=token_id, outcome=sig.outcome,
