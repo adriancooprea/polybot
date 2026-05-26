@@ -50,6 +50,44 @@ def _held_shares(pm: PolymarketClient, token_id: str) -> float:
     return 0.0
 
 
+def _reconcile_positions(pm: PolymarketClient, store: TradeStore) -> None:
+    """Adopt any real on-chain position we hold but aren't tracking.
+
+    A market order can return "delayed"/success yet only fill *after*
+    ``_handle_signal`` gives up confirming it — leaving an orphan position with
+    no exit management (it can then ride past take-profit, or worse, all the way
+    down past stop-loss to zero). This also re-attaches positions if state is
+    ever lost. Adopted positions get take-profit/stop-loss; whale-exodus can't
+    fire without the original trigger wallets, which we no longer know.
+    """
+    try:
+        positions = pm.positions(CONFIG.funder)
+    except Exception as exc:
+        print(f"  ! reconcile: positions fetch failed ({exc})")
+        return
+    for p in positions:
+        market_id = str(p.get("conditionId", ""))
+        size = float(p.get("size", 0) or 0)
+        if not market_id or size <= 0 or store.has(market_id):
+            continue
+        cur = float(p.get("curPrice", 0) or 0)
+        # Resolved positions are pinned to 0/1 and redeem on their own — a winner
+        # redeems at 1.0 (better than selling at 0.99), a loser is already gone.
+        # Nothing to exit-manage, so don't adopt.
+        if cur <= 0.05 or cur >= 0.95:
+            continue
+        entry = float(p.get("avgPrice", 0) or 0) or cur
+        store.add(OpenTrade(
+            market_id=market_id, token_id=str(p.get("asset", "")),
+            outcome=str(p.get("outcome", "")), title=str(p.get("title", "")),
+            entry_price=entry, shares=size,
+            stake_usd=float(p.get("initialValue", 0) or 0) or entry * size,
+            trigger_wallets=[], baseline_size={},
+        ))
+        print(f"   adopted untracked position: {str(p.get('title',''))[:40]} | "
+              f"{p.get('outcome','')} {size}@{entry:.3f} (cur {cur:.3f})")
+
+
 def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
                    store: TradeStore) -> None:
     if store.has(sig.market_id):
@@ -191,6 +229,9 @@ def run() -> None:
     with PolymarketClient() as pm:
         monitor = Monitor(wallets, pm)
         executor = Executor()
+        # Adopt any orphan positions (delayed fills, lost state) before we start,
+        # so they're exit-managed from the first cycle.
+        _reconcile_positions(pm, store)
         print(f"polybot live | dry_run={CONFIG.dry_run} | cap={CONFIG.max_trades_per_day}/day "
               f"| resuming {len(store.all())} open trade(s)")
         # heartbeat so 'is it alive?' is answerable from the log
@@ -199,6 +240,9 @@ def run() -> None:
 
         while True:
             try:
+                # Catch any orphan fills (delayed market orders that landed after
+                # _handle_signal gave up) and bring them under exit management.
+                _reconcile_positions(pm, store)
                 # Exits FIRST and BETWEEN signals — each ENTER vote takes ~30s, so
                 # checking exits only after the whole signal batch starved them and
                 # let profitable positions sit unlocked. Open positions are few, so
