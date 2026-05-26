@@ -51,20 +51,30 @@ def _held_shares(pm: PolymarketClient, token_id: str) -> float:
 
 
 def _reconcile_positions(pm: PolymarketClient, store: TradeStore) -> None:
-    """Adopt any real on-chain position we hold but aren't tracking.
+    """Sync tracked state to the actual on-chain holdings, both directions.
 
-    A market order can return "delayed"/success yet only fill *after*
+    ADOPT: a market order can return "delayed"/success yet only fill *after*
     ``_handle_signal`` gives up confirming it — leaving an orphan position with
-    no exit management (it can then ride past take-profit, or worse, all the way
-    down past stop-loss to zero). This also re-attaches positions if state is
-    ever lost. Adopted positions get take-profit/stop-loss; whale-exodus can't
-    fire without the original trigger wallets, which we no longer know.
+    no exit management. Bring any held-but-untracked position under management.
+    (Also re-attaches positions if state is ever lost.)
+
+    PRUNE: drop tracked positions we no longer hold on-chain (sold out-of-band,
+    or resolved/redeemed to zero). Necessary in hold-to-resolution mode: with
+    the percentage exits disabled, ``_handle_exits`` no longer fires for these,
+    so it never reaches the path that drops a zero-share position — they'd stay
+    tracked forever.
     """
     try:
         positions = pm.positions(CONFIG.funder)
     except Exception as exc:
         print(f"  ! reconcile: positions fetch failed ({exc})")
         return
+    held = {str(p.get("conditionId", "")) for p in positions
+            if float(p.get("size", 0) or 0) > 0}
+    for market_id, trade in store.all().items():
+        if market_id not in held:
+            store.remove(market_id)
+            print(f"   pruned closed/resolved position: {trade.title[:40]} | {trade.outcome}")
     for p in positions:
         market_id = str(p.get("conditionId", ""))
         size = float(p.get("size", 0) or 0)
