@@ -3,9 +3,13 @@
 A position closes on whichever fires first:
 
 1. **Take-profit**: unrealized PnL >= ``TAKE_PROFIT_PCT`` (default 15%).
-2. **Stop-loss**: unrealized PnL <= ``-STOP_LOSS_PCT`` (default 30%) — cap the
+2. **Absolute take-profit**: price >= ``TAKE_PROFIT_PRICE`` (default 0.95) —
+   bank a winner near resolution. Percentage take-profit is unreachable on
+   high-priced favorites (a 0.90 entry can't gain 25% without exceeding the 1.0
+   cap), so without this they'd ride to resolution exposed to a late reversal.
+3. **Stop-loss**: unrealized PnL <= ``-STOP_LOSS_PCT`` (default 30%) — cap the
    downside so a losing position can't ride to zero.
-3. **Whale exodus**: the top wallets that triggered the entry start *reducing*
+4. **Whale exodus**: the top wallets that triggered the entry start *reducing*
    their position size in this market.
 
 Exiting before the crowd reverses is what separates this from naive copy-trading.
@@ -22,13 +26,19 @@ from ..polymarket.client import PolymarketClient
 @dataclass(frozen=True)
 class ExitDecision:
     should_exit: bool
-    reason: str  # "take_profit" | "whale_exodus" | "hold"
+    reason: str  # "take_profit" | "take_profit_price" | "stop_loss" | "whale_exodus" | "hold"
 
 
 def take_profit_hit(entry_price: float, current_price: float, threshold: float) -> bool:
     if entry_price <= 0:
         return False
     return (current_price - entry_price) / entry_price >= threshold
+
+
+def take_profit_price_hit(current_price: float, ceiling: float) -> bool:
+    """True once price reaches the absolute ceiling (e.g. 0.95). Disabled when
+    ``ceiling >= 1.0`` (a market price can't exceed 1.0)."""
+    return ceiling < 1.0 and current_price >= ceiling
 
 
 def stop_loss_hit(entry_price: float, current_price: float, threshold: float) -> bool:
@@ -74,10 +84,13 @@ def evaluate_exit(
     baseline_size: dict[str, float],
     take_profit_pct: float = CONFIG.take_profit_pct,
     stop_loss_pct: float = CONFIG.stop_loss_pct,
+    take_profit_price: float = CONFIG.take_profit_price,
 ) -> ExitDecision:
     """Apply all rules; first match wins."""
     if take_profit_hit(entry_price, current_price, take_profit_pct):
         return ExitDecision(True, "take_profit")
+    if take_profit_price_hit(current_price, take_profit_price):
+        return ExitDecision(True, "take_profit_price")
     if stop_loss_hit(entry_price, current_price, stop_loss_pct):
         return ExitDecision(True, "stop_loss")
     if whales_reducing(client, market_id, trigger_wallets, baseline_size=baseline_size):

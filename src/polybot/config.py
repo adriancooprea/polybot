@@ -37,6 +37,10 @@ class Config:
 
     take_profit_pct: float = float(os.getenv("TAKE_PROFIT_PCT", "0.15"))
     stop_loss_pct: float = float(os.getenv("STOP_LOSS_PCT", "0.30"))
+    # absolute price ceiling to bank a winner before resolution — percentage
+    # take-profit is unreachable on high-priced favorites (e.g. 0.90 entry can't
+    # gain 25% without exceeding the 1.0 cap). Set >=1.0 to disable.
+    take_profit_price: float = float(os.getenv("TAKE_PROFIT_PRICE", "0.95"))
     # don't enter if the executable price has run more than this past consensus
     max_chase_pct: float = float(os.getenv("MAX_CHASE_PCT", "0.10"))
     stake_usd: float = float(os.getenv("STAKE_USD", "20"))
