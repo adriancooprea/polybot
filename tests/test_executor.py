@@ -33,10 +33,25 @@ def test_dry_run_buy_logs_not_sends(tmp_path, monkeypatch):
 def test_daily_cap_blocks_buys(tmp_path, monkeypatch):
     ex = _fresh_executor(tmp_path, monkeypatch)
     e = ex.Executor(dry_run=True, max_per_day=2)
-    for _ in range(2):
-        e.place(ex.Order("M", "Yes", "BUY", 20, 0.4, "t", "T", 50))
+    # distinct tokens: each is a separate market entry (dedup is per-token)
+    e.place(ex.Order("M1", "Yes", "BUY", 20, 0.4, "t", "T1", 50))
+    e.place(ex.Order("M2", "Yes", "BUY", 20, 0.4, "t", "T2", 50))
     with pytest.raises(ex.RiskError, match="daily cap"):
+        e.place(ex.Order("M3", "Yes", "BUY", 20, 0.4, "t", "T3", 50))
+
+
+def test_duplicate_entry_blocked(tmp_path, monkeypatch):
+    ex = _fresh_executor(tmp_path, monkeypatch)
+    e = ex.Executor(dry_run=True, max_per_day=10)
+    e.place(ex.Order("M", "Yes", "BUY", 20, 0.4, "t", "T", 50))
+    # second BUY on the same token is a double-entry — blocked before the cap
+    with pytest.raises(ex.RiskError, match="duplicate entry"):
         e.place(ex.Order("M", "Yes", "BUY", 20, 0.4, "t", "T", 50))
+    # opposite outcome (different token) is a separate position — allowed
+    assert e.place(ex.Order("M", "No", "BUY", 20, 0.6, "t", "T_NO", 33)) == "DRY_RUN"
+    # after a SELL closes the position, a fresh BUY on the original token is allowed
+    e.place(ex.Order("M", "Yes", "SELL", 20, 0.5, "exit", "T", 50))
+    assert e.place(ex.Order("M", "Yes", "BUY", 20, 0.55, "t", "T", 50)) == "DRY_RUN"
 
 
 def test_exits_bypass_daily_cap(tmp_path, monkeypatch):

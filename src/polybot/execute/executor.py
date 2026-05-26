@@ -57,6 +57,36 @@ def _trades_today() -> int:
     return n
 
 
+def _open_buy_in_log(token_id: str) -> bool:
+    """True if the trade log shows a filled BUY on ``token_id`` not yet offset by
+    a filled SELL — i.e. the position is already open or opening.
+
+    Guards against double-entry: a market order returns "delayed"/success but the
+    shares can take a while to surface in positions(), so neither the in-memory
+    store nor reconcile knows we hold it yet. A repeat signal in that gap would
+    place a second order on the same outcome (observed: $2+$2 = $4 positions).
+    The trade log is written the instant an order is accepted, so it closes the
+    gap and survives restarts. Keyed on token_id, so opposite outcomes (Yes/No)
+    of the same market are still allowed.
+    """
+    if not token_id or not TRADE_LOG.exists():
+        return False
+    last_buy = last_sell = ""
+    with TRADE_LOG.open() as f:
+        for line in f:
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("token_id") != token_id or rec.get("status") not in {"FILLED", "DRY_RUN"}:
+                continue
+            if rec.get("side") == "BUY":
+                last_buy = rec.get("ts", "")
+            elif rec.get("side") == "SELL":
+                last_sell = rec.get("ts", "")
+    return bool(last_buy) and last_buy > last_sell  # ISO ts compare; "" sorts first
+
+
 class RiskError(RuntimeError):
     """Raised when an order is blocked by a risk check."""
 
@@ -97,6 +127,8 @@ class Executor:
         if KILL_FILE.exists():
             raise RiskError(f"kill-switch active ({KILL_FILE})")
         if order.side == "BUY":  # only new entries are capped; exits always allowed
+            if _open_buy_in_log(order.token_id):
+                raise RiskError("duplicate entry: already hold/opening this position")
             n = _trades_today()
             if n >= self.max_per_day:
                 raise RiskError(f"daily cap reached ({n}/{self.max_per_day})")
