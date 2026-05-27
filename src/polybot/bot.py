@@ -127,6 +127,13 @@ def _handle_signal(sig: Signal, pm: PolymarketClient, executor: Executor,
     if price >= 0.95 or price <= 0.05:
         print(f"   skip: near-resolved (price {price:.3f}) — no vote")
         return
+    # Favorites-only floor: backtest (2024-25, 3 OOS splits) shows consensus has
+    # edge on favorites and *negative* edge on longshots — the sub-0.5 entries
+    # are the leak (and the live losers, e.g. Kym 0.31->0). Skip them pre-vote.
+    if price < CONFIG.min_entry_price:
+        print(f"   skip: entry {price:.3f} below favorites floor "
+              f"{CONFIG.min_entry_price:.2f} — no vote")
+        return
     # Anti-chase: price already ran past where the smart wallets entered.
     if sig.avg_price > 0 and price > sig.avg_price * (1 + CONFIG.max_chase_pct):
         print(f"   skip: price {price:.3f} ran {((price / sig.avg_price) - 1) * 100:.0f}% "

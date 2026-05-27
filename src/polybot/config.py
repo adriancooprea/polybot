@@ -43,6 +43,11 @@ class Config:
     take_profit_price: float = float(os.getenv("TAKE_PROFIT_PRICE", "0.95"))
     # don't enter if the executable price has run more than this past consensus
     max_chase_pct: float = float(os.getenv("MAX_CHASE_PCT", "0.10"))
+    # favorites-only floor: walk-forward backtest on the 2024-25 snapshot (3 OOS
+    # splits) showed consensus has a robust edge on favorites (entry >= ~0.6,
+    # ~91% win, +9.5% hold-to-resolution) and *negative* edge on longshots
+    # (entry < 0.5). Skip entries below this price. Set 0.0 to disable.
+    min_entry_price: float = float(os.getenv("MIN_ENTRY_PRICE", "0.0"))
     stake_usd: float = float(os.getenv("STAKE_USD", "20"))
     start_bankroll: float = float(os.getenv("START_BANKROLL", "200"))
     poll_seconds: int = int(os.getenv("POLL_SECONDS", "60"))
